@@ -1,0 +1,4 @@
+inquirer
+plexapi
+pre-commit
+unidecode
