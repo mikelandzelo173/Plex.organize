@@ -37,6 +37,7 @@ This project was inspired by Plex Playlist Sorter by uswemar:
 https://github.com/uswemar/PlexPlaylistSorter
 """
 
+import datetime
 import os
 import random
 import re
@@ -57,7 +58,7 @@ __author__ = "Michael Pölzl"
 __copyright__ = "Copyright 2022-2025, Michael Pölzl"
 __credits__ = ""
 __license__ = "GPL"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __maintainer__ = "Michael Pölzl"
 __email__ = "git@michaelpoelzl.at"
 __status__ = "Production"
@@ -148,7 +149,7 @@ def object_to_string(item: any, attr: str) -> str:
     )
 
 
-def sortable_term(term: str) -> str:
+def sortable_term(term: str | datetime.datetime) -> str:
     """
     Function: sortable_term()
 
@@ -156,10 +157,13 @@ def sortable_term(term: str) -> str:
     It also transliterates the term and changes or removes certain characters.
 
     :param term: Term to sort by
-    :type term: str
+    :type term: str|datetime.datetime
     :returns: Manipulated string to be used for sorting
     :rtype: str
     """
+    if isinstance(term, datetime.datetime):
+        return term.isoformat()
+
     term = unidecode(term.lower())
 
     articles = [
@@ -207,7 +211,6 @@ def sortable_term(term: str) -> str:
         term = " ".join(words)
 
     term = term.replace("&", "and")
-
     term = re.sub(r"[*.:,;…'\"/\\!?$()=+#<>|‘“¡¿´`]", "", term)
 
     return term.strip()
@@ -376,6 +379,11 @@ def choose_sorting_method(playlist: Playlist) -> tuple:
                 {
                     "name": "Release year",
                     "key": "year",
+                    "secondary_key": "title",
+                },
+                {
+                    "name": "Originally available at",
+                    "key": "originallyAvailableAt",
                     "secondary_key": "title",
                 },
             ],
