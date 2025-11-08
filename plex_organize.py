@@ -253,7 +253,7 @@ def confirm_question(message: str, default: bool = True) -> bool:
 
     :param message: The question to prompt
     :type message: str
-    :param default: Wheter 'Yes' or 'No' should be set as the default choice
+    :param default: Whether 'Yes' or 'No' should be set as the default choice
     :type default: bool
     :returns: A boolean
     :rtype: bool
@@ -272,7 +272,13 @@ def confirm_question(message: str, default: bool = True) -> bool:
     return answers["confirm"]
 
 
-def question(message: str, items: list, attr: str | None = None, none_choice: bool = False) -> any:
+def question(
+    message: str,
+    items: list,
+    attr: str | None = None,
+    none_choice: bool = False,
+    automatic_single_coice_return: bool = False,
+) -> any:
     """
     Function: question()
 
@@ -286,12 +292,14 @@ def question(message: str, items: list, attr: str | None = None, none_choice: bo
     :type attr: str
     :returns: The selected item of the same type which has been passed in items
     :type none_choice: bool
-    :returns: Wheter the answers should include a "None" option by default
+    :returns: Whether the answers should include a "None" option by default
+    :type automatic_single_coice_return: bool
+    :returns: Whether the function should automatically return the only available option by default
     :rtype: any
     """
 
     # Return the first item if there is only one choice
-    if len(items) == 1:
+    if len(items) == 1 and automatic_single_coice_return:
         return items[0]
 
     clear()
@@ -405,7 +413,12 @@ def choose_sorting_method(playlist: Playlist) -> tuple:
 
     clear()
 
-    selected_choice = question(f"Select the sorting key for this {playlist_type} playlist", choices, "name")
+    selected_choice = question(
+        message=f"Select the sorting key for this {playlist_type} playlist",
+        items=choices,
+        attr="name",
+        automatic_single_coice_return=False,
+    )
 
     if selected_choice["key"] == "shuffle":
         return selected_choice["key"], selected_choice["key"], selected_choice["key"], selected_choice["key"], False
@@ -424,9 +437,10 @@ def choose_sorting_method(playlist: Playlist) -> tuple:
     clear()
 
     selected_sorting_choice = question(
-        f"Select the sorting direction for {selected_choice['name']}",
-        sorting_choices,
-        "name",
+        message=f"Select the sorting direction for {selected_choice['name']}",
+        items=sorting_choices,
+        attr="name",
+        automatic_single_coice_return=False,
     )
 
     return (
@@ -818,6 +832,7 @@ def upgrade_playlist(
                     items=replacements,
                     attr=audio_to_str,
                     none_choice=True,
+                    automatic_single_coice_return=False,
                 )
 
                 # Add the tracks to separate lists for future usage
@@ -884,7 +899,12 @@ if __name__ == "__main__":
 
     # Select a resource to connect to
     resources = get_resources(account)
-    resource = question("Select resource to connect to", resources, "name")
+    resource = question(
+        message="Select a resource to connect to",
+        items=resources,
+        attr="name",
+        automatic_single_coice_return=True,
+    )
 
     # Connect to the selected resource and create a server object
     server = account.resource(resource.name).connect()
@@ -892,19 +912,25 @@ if __name__ == "__main__":
     while True:
         # Decide what you want to organize
         action = question(
-            "What do you want to organize?",
-            [
+            message="What do you want to organize?",
+            items=[
                 "Sort playlists (audio & video)",
                 "Upgrade playlists (audio only)",
                 "Find all music albums with low bitrate (audio only)",
             ],
+            automatic_single_coice_return=False,
         )
 
         # Sort playlists (audio & video)
         if action == "Sort playlists (audio & video)":
             # Select a playlist to organize
             playlists = get_playlists(server)
-            playlist = question("Select a playlist to sort", playlists, "title")
+            playlist = question(
+                message="Select a playlist to sort",
+                items=playlists,
+                attr="title",
+                automatic_single_coice_return=False,
+            )
 
             # Select the sorting method
             sort_key, backup_sort_key, secondary_sort_key, backup_secondary_sort_key, sort_reverse = (
@@ -937,17 +963,22 @@ if __name__ == "__main__":
         elif action == "Upgrade playlists (audio only)":
             # Select a playlist to organize
             playlists = get_playlists(server, ["audio"])
-            playlist = question("Select a playlist to upgrade", playlists, "title")
+            playlist = question(
+                message="Select a playlist to upgrade",
+                items=playlists,
+                attr="title",
+                automatic_single_coice_return=False,
+            )
 
             clear()
 
-            # Decide on wheter this should only be a dry run
+            # Decide on whether this should only be a dry run
             dry = confirm_question(
                 "Do you want to perform a dry run instead of actually modifying anything?",
                 default=False,
             )
 
-            # Decide on wheter the simple replacement mode should be used
+            # Decide on whether the simple replacement mode should be used
             simple_mode = (
                 True
                 if dry
@@ -983,7 +1014,12 @@ if __name__ == "__main__":
         elif action == "Find all music albums with low bitrate (audio only)":
             # Select a library section to connect to
             sections = get_sections(server, "artist")
-            section = question("Select section to connect to", sections, "title")
+            section = question(
+                message="Select a section to connect to",
+                items=sections,
+                attr="title",
+                automatic_single_coice_return=True,
+            )
 
             clear()
 
