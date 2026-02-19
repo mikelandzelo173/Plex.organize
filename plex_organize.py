@@ -959,6 +959,8 @@ if __name__ == "__main__":
                 duplicate=duplicate,
             )
 
+            clear()
+
         # Upgrade playlists (audio only)
         elif action == "Upgrade playlists (audio only)":
             # Select a playlist to organize
@@ -1010,6 +1012,8 @@ if __name__ == "__main__":
                 dry=dry,
             )
 
+            clear()
+
         # Find all music albums with low bitrate (audio only)
         elif action == "Find all music albums with low bitrate (audio only)":
             # Select a library section to connect to
@@ -1021,6 +1025,12 @@ if __name__ == "__main__":
                 automatic_single_coice_return=True,
             )
 
+            # Decide on whether to save the list of albums to a local text file
+            save_to_file = confirm_question(
+                "Do you want to save the list of albums to a local text file?",
+                default=False,
+            )
+
             clear()
 
             print(
@@ -1028,19 +1038,32 @@ if __name__ == "__main__":
             )
             print()
 
+            low_bitrate_albums = []
+
             # Get all albums
             for album in section.albums():
                 # Get all tracks of the album and check if they all meet the quality criteria
                 for track in album.tracks():
                     if not check_quality_requirements(track):
+                        low_bitrate_album = (
+                            f"{album.parentTitle} - {album.title} ({album.year}) "
+                            f"[{track.media[0].audioCodec}][{track.media[0].bitrate}]"
+                        )
+                        low_bitrate_albums.append(low_bitrate_album)
                         print(
-                            f"❌ {album.parentTitle} - {album.title} ({album.year}) [{track.media[0].audioCodec}][{track.media[0].bitrate}] must be upgraded.",
+                            f"❌ {low_bitrate_album} must be upgraded.",
                         )
                         break
 
-            print()
-
-        clear()
+            if len(low_bitrate_albums) and save_to_file:
+                file_name = f"low_bitrate_albums_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                with open(file_name, "w", encoding="utf-8") as file:
+                    file.write("\n".join(sorted(low_bitrate_albums)))
+                print(f"✅ Saved {len(low_bitrate_albums)} entries to '{file_name}'.")
+                clear()
+            else:
+                print()
+                print()
 
         if not confirm_question("Do you want to organize another playlist?"):
             sys.exit()
