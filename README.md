@@ -1,7 +1,7 @@
 # Plex.organize
 
 Plex.organize is a simple script that lets you log into your Plex account and organize your media playlists.
-You can sort, upgrade, and analyze different media playlists, which, sadly, Plex itself won't be able to do.
+You can sort, upgrade, export, and analyze different media playlists, which, sadly, Plex itself won't be able to do.
 
 Currently, Python 3.7+ is supported.
 
@@ -44,6 +44,7 @@ pip install -r requirements.txt
  > Sort playlists (audio & video)
    Upgrade playlists (audio only)
    Find all music albums with low bitrate (audio only)
+   Export playlist as M3U (audio & video)
    ❌ Abort
 
 [?] Select a playlist to sort:
@@ -116,4 +117,11 @@ You can also influence the script on how to upgrade your playlists by setting th
 [upgrade]
 force_all=
 force_lossless=
+```
+
+You can export playlists to local `.m3u` files and define the output directory in the config file.
+
+```ini
+[export]
+output_directory = ~/Music/Playlists
 ```

@@ -43,6 +43,7 @@ import random
 import re
 import sys
 from getpass import getpass
+from pathlib import Path
 
 import inquirer
 from plexapi import PlexConfig
@@ -126,6 +127,64 @@ def audio_to_str(item: Audio) -> str:
         f"{artist(item)} - {item.title} ({item.album().title}) "
         f"[{duration_to_str(item.media[0].duration)}][{item.media[0].audioCodec}][{item.media[0].bitrate}]"
     )
+
+
+def item_duration_seconds(item: any) -> int:
+    """
+    Function: item_duration_seconds()
+
+    Returns the duration of an item in seconds.
+
+    :param item: Playlist item
+    :type item: any
+    :returns: Duration in seconds
+    :rtype: int
+    """
+
+    duration = getattr(item, "duration", 0) or 0
+    return int(duration / 1000)
+
+
+def item_to_m3u_title(item: any, playlist_type: str) -> str:
+    """
+    Function: item_to_m3u_title()
+
+    Returns a human-readable title for an M3U entry.
+
+    :param item: Playlist item
+    :type item: any
+    :param playlist_type: Playlist type
+    :type playlist_type: str
+    :returns: String representation of the item title
+    :rtype: str
+    """
+
+    if playlist_type == "audio":
+        item_artist = getattr(item, "originalTitle", None) or getattr(item, "grandparentTitle", None)
+        if item_artist:
+            return f"{item_artist} - {item.title}"
+
+    return item.title
+
+
+def item_to_paths(item: any) -> list[str]:
+    """
+    Function: item_to_paths()
+
+    Extracts all local file paths from a playlist item.
+
+    :param item: Playlist item
+    :type item: any
+    :returns: A list of local file paths
+    :rtype: list[str]
+    """
+
+    paths = []
+    for media in getattr(item, "media", []):
+        for part in getattr(media, "parts", []):
+            if getattr(part, "file", None):
+                paths.append(part.file)
+    return paths
 
 
 def object_to_string(item: any, attr: str) -> str:
@@ -513,7 +572,17 @@ def get_account(config: PlexConfig) -> MyPlexAccount:
             ),
         ]
 
-        answers = inquirer.prompt(questions)
+        try:
+            answers = inquirer.prompt(questions)
+        except KeyboardInterrupt:
+            print()
+            print("Login cancelled.")
+            sys.exit(130)
+
+        if not answers:
+            print()
+            print("Login cancelled.")
+            sys.exit(130)
 
         try:
             account = MyPlexAccount(answers["username"], answers["password"])
@@ -888,6 +957,60 @@ def upgrade_playlist(
     return playlist
 
 
+def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
+    """
+    Function: export_playlist_as_m3u()
+
+    Exports a playlist to a local M3U file.
+
+    :param config: PlexConfig object
+    :type config: PlexConfig
+    :param playlist: Playlist object
+    :type playlist: Playlist
+    :returns: Path to the exported M3U file
+    :rtype: pathlib.Path
+    """
+
+    clear()
+    print(
+        "Playlist export in progress. This may take a while depending on the size of your playlist. Please be patient.",
+    )
+
+    output_directory = (config.get("export.output_directory") or "").strip()
+    output_directory_path = Path(output_directory or ".").expanduser().resolve()
+    output_directory_path.mkdir(parents=True, exist_ok=True)
+    print(f'Using export directory "{output_directory_path}" (source: active Plex config).')
+
+    safe_playlist_title = re.sub(r"\s*:\s*", " - ", playlist.title)
+    safe_playlist_title = re.sub(r"[^\w\-. ']", "_", safe_playlist_title).strip() or "playlist"
+    output_file_name = f"{safe_playlist_title}.m3u"
+    output_file_path = output_directory_path / output_file_name
+
+    items = playlist.items()
+    skipped_items = 0
+
+    with output_file_path.open("w", encoding="utf-8") as file:
+        file.write("#EXTM3U\n")
+
+        for item in items:
+            item_paths = item_to_paths(item)
+
+            if not item_paths:
+                skipped_items += 1
+                continue
+
+            file.write(f"#EXTINF:{item_duration_seconds(item)},{item_to_m3u_title(item, playlist.playlistType)}\n")
+
+            for item_path in item_paths:
+                file.write(f"{item_path}\n")
+
+    print(f'✅ Playlist "{playlist.title}" exported to "{output_file_path}".')
+    if skipped_items:
+        print(f"⚠️ Skipped {skipped_items} items because no local media file path was available.")
+
+    return output_file_path
+
+
 if __name__ == "__main__":
     clear()
 
@@ -917,6 +1040,7 @@ if __name__ == "__main__":
                 "Sort playlists (audio & video)",
                 "Upgrade playlists (audio only)",
                 "Find all music albums with low bitrate (audio only)",
+                "Export playlist as M3U (audio & video)",
             ],
             automatic_single_coice_return=False,
         )
@@ -1064,6 +1188,21 @@ if __name__ == "__main__":
             else:
                 print()
                 print()
+
+        # Export playlist as M3U
+        elif action == "Export playlist as M3U (audio & video)":
+            playlists = get_playlists(server)
+            playlist = question(
+                message="Select a playlist to export",
+                items=playlists,
+                attr="title",
+                automatic_single_coice_return=False,
+            )
+
+            export_playlist_as_m3u(
+                config=config,
+                playlist=playlist,
+            )
 
         if not confirm_question("Do you want to organize another playlist?"):
             sys.exit()
