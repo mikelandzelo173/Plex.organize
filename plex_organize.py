@@ -187,6 +187,32 @@ def item_to_paths(item: any) -> list[str]:
     return paths
 
 
+def export_path_to_m3u_path(item_path: str, relative_path_base: str | None = None) -> str:
+    """
+    Function: export_path_to_m3u_path()
+
+    Converts an item path to a relative M3U path when a relative base path is configured.
+
+    :param item_path: Local media file path
+    :type item_path: str
+    :param relative_path_base: Base path to remove from item paths
+    :type relative_path_base: str|None
+    :returns: Absolute or relative M3U path
+    :rtype: str
+    """
+
+    if not relative_path_base:
+        return item_path
+
+    item_path_object = Path(item_path).expanduser().resolve(strict=False)
+    relative_path_base_object = Path(relative_path_base).expanduser().resolve(strict=False)
+
+    try:
+        return item_path_object.relative_to(relative_path_base_object).as_posix()
+    except ValueError:
+        return item_path
+
+
 def object_to_string(item: any, attr: str) -> str:
     """
     Function: object_to_string()
@@ -977,9 +1003,14 @@ def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
     )
 
     output_directory = (config.get("export.output_directory") or "").strip()
+    relative_path_base = (config.get("export.relative_path_base") or "").strip()
     output_directory_path = Path(output_directory or ".").expanduser().resolve()
     output_directory_path.mkdir(parents=True, exist_ok=True)
     print(f'Using export directory "{output_directory_path}" (source: active Plex config).')
+    if relative_path_base:
+        print(f'Exporting media paths relative to "{Path(relative_path_base).expanduser().resolve(strict=False)}".')
+    else:
+        print("Exporting media paths as absolute paths.")
 
     safe_playlist_title = re.sub(r"\s*:\s*", " - ", playlist.title)
     safe_playlist_title = re.sub(r"[^\w\-. ']", "_", safe_playlist_title).strip() or "playlist"
@@ -988,6 +1019,7 @@ def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
 
     items = playlist.items()
     skipped_items = 0
+    unmatched_relative_base_paths = 0
 
     with output_file_path.open("w", encoding="utf-8") as file:
         file.write("#EXTM3U\n")
@@ -1002,11 +1034,19 @@ def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
             file.write(f"#EXTINF:{item_duration_seconds(item)},{item_to_m3u_title(item, playlist.playlistType)}\n")
 
             for item_path in item_paths:
-                file.write(f"{item_path}\n")
+                m3u_item_path = export_path_to_m3u_path(item_path, relative_path_base)
+                if relative_path_base and m3u_item_path == item_path:
+                    unmatched_relative_base_paths += 1
+                file.write(f"{m3u_item_path}\n")
 
     print(f'✅ Playlist "{playlist.title}" exported to "{output_file_path}".')
     if skipped_items:
         print(f"⚠️ Skipped {skipped_items} items because no local media file path was available.")
+    if unmatched_relative_base_paths:
+        print(
+            f"⚠️ Wrote {unmatched_relative_base_paths} media file paths as absolute paths because they are outside "
+            f'the configured relative path base "{Path(relative_path_base).expanduser().resolve(strict=False)}".',
+        )
 
     return output_file_path
 

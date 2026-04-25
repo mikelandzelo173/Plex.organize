@@ -119,9 +119,16 @@ force_all=
 force_lossless=
 ```
 
-You can export playlists to local `.m3u` files and define the output directory in the config file.
+You can export playlists to local `.m3u` files and define the output directory in the config file. By default, media
+file paths are exported as absolute paths. To export paths relative to a music library directory, set
+`relative_path_base`.
 
 ```ini
 [export]
 output_directory = ~/Music/Playlists
+relative_path_base = /volume1/music
 ```
+
+With `relative_path_base = /volume1/music`, an item path like
+`/volume1/music/a-ha/Lifelines (Deluxe Edition)/01-03 Forever Not Yours.flac` is written as
+`a-ha/Lifelines (Deluxe Edition)/01-03 Forever Not Yours.flac`.
