@@ -42,12 +42,11 @@ import os
 import random
 import re
 import sys
-from getpass import getpass
 from pathlib import Path
 
 import inquirer
 from plexapi import PlexConfig
-from plexapi.audio import Album, Audio
+from plexapi.audio import Audio
 from plexapi.exceptions import Unauthorized
 from plexapi.library import MovieSection, MusicSection, PhotoSection, ShowSection
 from plexapi.myplex import MyPlexAccount, MyPlexResource
@@ -146,7 +145,7 @@ def print_progress_bar(
     bar = "#" * filled_width + "-" * (width - filled_width)
 
     sys.stdout.write(
-        f"\r{label}: [{bar}] {progress * 100:5.1f}% ({current}/{total}) " f"elapsed {format_elapsed_time(start_time)}",
+        f"\r{label}: [{bar}] {progress * 100:5.1f}% ({current}/{total}) elapsed {format_elapsed_time(start_time)}",
     )
     sys.stdout.flush()
 
@@ -485,7 +484,8 @@ def choose_sorting_method(playlist: Playlist) -> tuple:
 
     Decide on how to sort the selected playlist.
 
-    :returns: A tuple with the key, backup key and direction to sort. The backup key can be used if the main key may be of type NoneType.
+    :returns: A tuple with the key, backup key and direction to sort. The backup key can be used if the
+              main key may be of type NoneType.
     :rtype: tuple
     """
 
@@ -628,7 +628,8 @@ def get_account(config: PlexConfig) -> MyPlexAccount:
 
             print()
             print(
-                "This is your authentication token that you can save in your configuration file to avoid having to log in every time:",
+                "This is your authentication token that you can save in your configuration file to avoid "
+                "having to log in every time:",
             )
             print(account.authenticationToken)
             print()
@@ -677,7 +678,8 @@ def get_account(config: PlexConfig) -> MyPlexAccount:
 
             print()
             print(
-                "This is your authentication token that you can save in your configuration file to avoid having to log in every time:",
+                "This is your authentication token that you can save in your configuration file to avoid "
+                "having to log in every time:",
             )
             print(account.authenticationToken)
             print()
@@ -793,11 +795,15 @@ def sort_playlist(
     :type server: PlexServer
     :param playlist: Playlist object
     :type playlist: Playlistobject
-    :param sort_key: The object key you want to sort the playlist by. Available choices depend on the type of media the playlist contains.
+    :param sort_key: The object key you want to sort the playlist by. Available choices depend on the
+                     type of media the playlist contains.
     :type sort_key: str
-    :param backup_sort_key: The backup object key to sort the playlist by if the sort_key may be of type NoneType. Mandatory for sorting by artist.
+    :param backup_sort_key: The backup object key to sort the playlist by if the sort_key may be of
+                            type NoneType. Mandatory for sorting by artist.
     :type backup_sort_key: str
-    :param secondary_sort_key: The secondary object key you want to sort the playlist by after it has already been sorted by the sort_key, e.g. the track artist after sorting the list by track title to group them together. Only viable for audio playlists.
+    :param secondary_sort_key: The secondary object key you want to sort the playlist by after it has
+                               already been sorted by the sort_key, e.g. the track artist after sorting
+                               the list by track title to group them together. Only viable for audio playlists.
     :type secondary_sort_key: str
     :param backup_secondary_sort_key: The backup object key for the secondary_sort_key.
     :type backup_secondary_sort_key: str
@@ -812,7 +818,8 @@ def sort_playlist(
     clear()
 
     print(
-        "Sorting playlist in progress. This may take a while depending on the size of your playlist. Please be patient.",
+        "Sorting playlist in progress. This may take a while depending on the size of your playlist. "
+        "Please be patient.",
     )
 
     # Get all items and sort them
@@ -906,7 +913,8 @@ def upgrade_playlist(
     clear()
 
     print(
-        "Upgrading playlist in progress. This may take a while depending on the size of your playlist. Please be patient.",
+        "Upgrading playlist in progress. This may take a while depending on the size of your playlist. "
+        "Please be patient.",
     )
 
     # Get all items
@@ -957,11 +965,7 @@ def upgrade_playlist(
             # Sort the search results by bitrate and artist
             replacements = sorted(
                 replacements,
-                key=lambda x: (
-                    getattr(x, "originalTitle")
-                    if getattr(x, "originalTitle") is not None
-                    else getattr(x, "grandparentTitle")
-                ),
+                key=lambda x: x.originalTitle if x.originalTitle is not None else x.grandparentTitle,
             )
             replacements = sorted(replacements, key=lambda x: x.media[0].bitrate, reverse=True)
 
@@ -1215,7 +1219,8 @@ if __name__ == "__main__":
                 True
                 if dry
                 else confirm_question(
-                    "Do you want to enable the simple replacement mode (The best version available will automatically be selected)?",
+                    "Do you want to enable the simple replacement mode "
+                    "(The best version available will automatically be selected)?",
                     default=False,
                 )
             )
@@ -1264,7 +1269,8 @@ if __name__ == "__main__":
             clear()
 
             print(
-                "Album search in progress. This may take a while depending on the size of your music library. Please be patient.",
+                "Album search in progress. This may take a while depending on the size of your music library. "
+                "Please be patient.",
             )
             print()
 

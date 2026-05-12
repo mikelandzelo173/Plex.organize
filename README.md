@@ -3,7 +3,7 @@
 Plex.organize is a simple script that lets you log into your Plex account and organize your media playlists.
 You can sort, upgrade, export, and analyze different media playlists, which, sadly, Plex itself won't be able to do.
 
-Currently, Python 3.7+ is supported.
+Currently, Python 3.10+ is supported.
 
 ## Quickstart
 
