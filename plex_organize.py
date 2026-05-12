@@ -95,6 +95,62 @@ def duration_to_str(duration: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def format_elapsed_time(start_time: datetime.datetime) -> str:
+    """
+    Function: format_elapsed_time()
+
+    Converts an elapsed time to a readable string representation.
+
+    :param start_time: Datetime when the operation started
+    :type start_time: datetime.datetime
+    :returns: String representation of elapsed time
+    :rtype: str
+    """
+
+    elapsed_seconds = int((datetime.datetime.now() - start_time).total_seconds())
+    minutes, seconds = divmod(elapsed_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def print_progress_bar(
+    current: int,
+    total: int,
+    label: str,
+    start_time: datetime.datetime,
+    width: int = 40,
+) -> None:
+    """
+    Function: print_progress_bar()
+
+    Prints a terminal progress bar on a single updating line.
+
+    :param current: Current number of processed items
+    :type current: int
+    :param total: Total number of items to process
+    :type total: int
+    :param label: Label to display before the progress bar
+    :type label: str
+    :param start_time: Datetime when the operation started
+    :type start_time: datetime.datetime
+    :param width: Width of the progress bar
+    :type width: int
+    """
+
+    progress = current / total if total else 1
+    filled_width = int(width * progress)
+    bar = "#" * filled_width + "-" * (width - filled_width)
+
+    sys.stdout.write(
+        f"\r{label}: [{bar}] {progress * 100:5.1f}% ({current}/{total}) " f"elapsed {format_elapsed_time(start_time)}",
+    )
+    sys.stdout.flush()
+
+
 def artist(item: Audio) -> str:
     """
     Function: artist()
@@ -234,22 +290,28 @@ def object_to_string(item: any, attr: str) -> str:
     )
 
 
-def sortable_term(term: str | datetime.datetime) -> str:
+def sortable_term(term: str | int | float | datetime.date | None) -> tuple[int, str | int | float]:
     """
     Function: sortable_term()
 
-    Transforms the provided term to a sortable string by removing articles and changing it to lowercase.
-    It also transliterates the term and changes or removes certain characters.
+    Transforms the provided term to a sortable value. Text values have articles removed
+    and are normalized; numeric and date values keep their natural ordering.
 
     :param term: Term to sort by
-    :type term: str|datetime.datetime
-    :returns: Manipulated string to be used for sorting
-    :rtype: str
+    :type term: str|int|float|datetime.date|None
+    :returns: Manipulated value to be used for sorting
+    :rtype: tuple
     """
-    if isinstance(term, datetime.datetime):
-        return term.isoformat()
+    if term is None:
+        return (0, "")
 
-    term = unidecode(term.lower())
+    if isinstance(term, (int, float)):
+        return (1, term)
+
+    if isinstance(term, datetime.date):
+        return (2, term.isoformat())
+
+    term = unidecode(str(term).lower())
 
     articles = [
         # German
@@ -298,7 +360,7 @@ def sortable_term(term: str | datetime.datetime) -> str:
     term = term.replace("&", "and")
     term = re.sub(r"[*.:,;…'\"/\\!?$()=+#<>|‘“¡¿´`]", "", term)
 
-    return term.strip()
+    return (3, term.strip())
 
 
 def check_quality_requirements(item: Audio) -> bool:
@@ -797,10 +859,14 @@ def sort_playlist(
     # Sort an existing playlist
     else:
         print(f'Sorting playlist "{playlist.title}"...')
+        progress_started_at = datetime.datetime.now()
+        print_progress_bar(0, len(items), "Sorting playlist", progress_started_at)
         previous_item = None
-        for item in items:
+        for index, item in enumerate(items, start=1):
             playlist.moveItem(item, after=previous_item)
             previous_item = item
+            print_progress_bar(index, len(items), "Sorting playlist", progress_started_at)
+        print()
 
         print(f'Successfully sorted playlist "{playlist.title}".')
         return playlist

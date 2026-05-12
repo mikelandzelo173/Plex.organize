@@ -72,6 +72,7 @@ pip install -r requirements.txt
 Sorting playlist in progress. This may take a while depending on the size of your playlist. Please be patient.
 Preparing playlist items...
 Sorting playlist "Movies to watch"...
+Sorting playlist: [########################################] 100.0% (42/42) elapsed 00:18
 Successfully sorted playlist "Movies to watch".
 
 [?] Do you want to organize another playlist? (Y/n): n
