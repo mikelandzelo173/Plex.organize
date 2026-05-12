@@ -776,6 +776,47 @@ def get_resources(account: MyPlexAccount) -> list[MyPlexResource]:
     return [resource for resource in account.resources() if resource.product == "Plex Media Server"]
 
 
+def playlist_item_order_key(item: any) -> str:
+    """
+    Function: playlist_item_order_key()
+
+    Returns the most specific stable key available for comparing playlist item order.
+
+    :param item: Playlist item
+    :type item: any
+    :returns: Comparable playlist item key
+    :rtype: str
+    """
+
+    return str(getattr(item, "playlistItemID", None) or getattr(item, "ratingKey", None) or id(item))
+
+
+def move_playlist_items_one_by_one(playlist: Playlist, items: list) -> Playlist:
+    """
+    Function: move_playlist_items_one_by_one()
+
+    Sorts a playlist using Plex's single-item move endpoint.
+
+    :param playlist: Playlist object
+    :type playlist: Playlist
+    :param items: Playlist items in the desired order
+    :type items: list
+    :returns: The modified Playlist object
+    :rtype: Playlist
+    """
+
+    progress_started_at = datetime.datetime.now()
+    print_progress_bar(0, len(items), "Sorting playlist", progress_started_at)
+    previous_item = None
+    for index, item in enumerate(items, start=1):
+        playlist.moveItem(item, after=previous_item)
+        previous_item = item
+        print_progress_bar(index, len(items), "Sorting playlist", progress_started_at)
+    print()
+
+    return playlist
+
+
 def sort_playlist(
     server: PlexServer,
     playlist: Playlist,
@@ -824,7 +865,8 @@ def sort_playlist(
 
     # Get all items and sort them
     print("Preparing playlist items...")
-    items = playlist.items()
+    original_items = playlist.items()
+    items = list(original_items)
     if sort_key == "shuffle":
         random.shuffle(items)
     else:
@@ -864,19 +906,16 @@ def sort_playlist(
         return new_playlist
 
     # Sort an existing playlist
-    else:
-        print(f'Sorting playlist "{playlist.title}"...')
-        progress_started_at = datetime.datetime.now()
-        print_progress_bar(0, len(items), "Sorting playlist", progress_started_at)
-        previous_item = None
-        for index, item in enumerate(items, start=1):
-            playlist.moveItem(item, after=previous_item)
-            previous_item = item
-            print_progress_bar(index, len(items), "Sorting playlist", progress_started_at)
-        print()
+    print(f'Sorting playlist "{playlist.title}"...')
 
-        print(f'Successfully sorted playlist "{playlist.title}".')
+    if [playlist_item_order_key(item) for item in original_items] == [playlist_item_order_key(item) for item in items]:
+        print(f'Playlist "{playlist.title}" is already sorted.')
         return playlist
+
+    move_playlist_items_one_by_one(playlist, items)
+
+    print(f'Successfully sorted playlist "{playlist.title}".')
+    return playlist
 
 
 def upgrade_playlist(
