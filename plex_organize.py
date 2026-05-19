@@ -718,6 +718,52 @@ def get_config() -> PlexConfig:
         return PlexConfig(os.environ.get("PLEXAPI_CONFIG_PATH", os.path.expanduser("config.ini")))
 
 
+def get_server(config: PlexConfig) -> PlexServer:
+    """
+    Function: get_server()
+
+    Connects to a Plex server either directly via configured base URL and token, or through MyPlex discovery.
+
+    :param config: PlexConfig object
+    :type config: PlexConfig
+    :returns: A PlexServer object
+    :rtype: PlexServer
+    """
+
+    server_baseurl = (config.get("auth.server_baseurl") or "").strip()
+    server_token = (config.get("auth.server_token") or "").strip()
+
+    if server_baseurl:
+        if not server_token:
+            print("ERROR: auth.server_token must be set when auth.server_baseurl is configured.")
+            sys.exit(1)
+
+        try:
+            return PlexServer(server_baseurl, server_token)
+        except Unauthorized:
+            print("ERROR: Invalid token for the configured Plex server.")
+            sys.exit(1)
+        except Exception as e:
+            print(f'ERROR: Could not connect to Plex server at "{server_baseurl}".')
+            print(e)
+            sys.exit(1)
+
+    # Login to the Plex account
+    account = get_account(config)
+
+    # Select a resource to connect to
+    resources = get_resources(account)
+    resource = question(
+        message="Select a resource to connect to",
+        items=resources,
+        attr="name",
+        automatic_single_coice_return=True,
+    )
+
+    # Connect to the selected resource and create a server object
+    return account.resource(resource.name).connect()
+
+
 def get_playlists(server: PlexServer, filter_type: list = None) -> list[Playlist]:
     """
     Function: get_playlists()
@@ -1166,20 +1212,8 @@ if __name__ == "__main__":
     # Load configuration
     config = get_config()
 
-    # Login to the Plex account
-    account = get_account(config)
-
-    # Select a resource to connect to
-    resources = get_resources(account)
-    resource = question(
-        message="Select a resource to connect to",
-        items=resources,
-        attr="name",
-        automatic_single_coice_return=True,
-    )
-
-    # Connect to the selected resource and create a server object
-    server = account.resource(resource.name).connect()
+    # Connect to the Plex server
+    server = get_server(config)
 
     while True:
         # Decide what you want to organize

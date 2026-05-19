@@ -95,6 +95,15 @@ myplex_password = MyR4nd0mPassword
 server_token = AjsUeO6Bk89BQPdu5Dnj
 ```
 
+If the machine running this script can access your Plex server directly on the local network, you can bypass Plex.tv
+resource discovery by configuring the local server URL together with your token:
+
+```ini
+[auth]
+server_baseurl = http://192.168.x.x:32400
+server_token = AjsUeO6Bk89BQPdu5Dnj
+```
+
 **Important note for 2FA accounts**  
 If you have activated two-factor authentication, after you have already logged in once you can either log in again with
 your previously generated token or add your 6-digit number from the authenticator app at the end of your password, e.g.
