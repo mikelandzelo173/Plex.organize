@@ -1172,27 +1172,35 @@ def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
     output_file_name = f"{safe_playlist_title}.m3u"
     output_file_path = output_directory_path / output_file_name
 
-    items = playlist.items()
+    items = list(playlist.items())
     skipped_items = 0
     unmatched_relative_base_paths = 0
+
+    progress_started_at = datetime.datetime.now()
+    print_progress_bar(0, len(items), "Exporting playlist", progress_started_at)
 
     with output_file_path.open("w", encoding="utf-8") as file:
         file.write("#EXTM3U\n")
 
-        for item in items:
-            item_paths = item_to_paths(item)
+        for index, item in enumerate(items, start=1):
+            try:
+                item_paths = item_to_paths(item)
 
-            if not item_paths:
-                skipped_items += 1
-                continue
+                if not item_paths:
+                    skipped_items += 1
+                    continue
 
-            file.write(f"#EXTINF:{item_duration_seconds(item)},{item_to_m3u_title(item, playlist.playlistType)}\n")
+                file.write(f"#EXTINF:{item_duration_seconds(item)},{item_to_m3u_title(item, playlist.playlistType)}\n")
 
-            for item_path in item_paths:
-                m3u_item_path = export_path_to_m3u_path(item_path, relative_path_base)
-                if relative_path_base and m3u_item_path == item_path:
-                    unmatched_relative_base_paths += 1
-                file.write(f"{m3u_item_path}\n")
+                for item_path in item_paths:
+                    m3u_item_path = export_path_to_m3u_path(item_path, relative_path_base)
+                    if relative_path_base and m3u_item_path == item_path:
+                        unmatched_relative_base_paths += 1
+                    file.write(f"{m3u_item_path}\n")
+            finally:
+                print_progress_bar(index, len(items), "Exporting playlist", progress_started_at)
+
+    print()
 
     print(f'✅ Playlist "{playlist.title}" exported to "{output_file_path}".')
     if skipped_items:
