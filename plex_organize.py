@@ -38,10 +38,14 @@ https://github.com/uswemar/PlexPlaylistSorter
 """
 
 import datetime
+import json
 import os
 import random
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import inquirer
@@ -266,6 +270,223 @@ def export_path_to_m3u_path(item_path: str, relative_path_base: str | None = Non
         return item_path_object.relative_to(relative_path_base_object).as_posix()
     except ValueError:
         return item_path
+
+
+def export_path_to_music_assistant_uri(
+    item_path: str,
+    relative_path_base: str,
+    provider_instance: str,
+) -> str | None:
+    """
+    Function: export_path_to_music_assistant_uri()
+
+    Converts a Plex media file path to a Music Assistant filesystem track URI.
+
+    :param item_path: Local media file path as reported by Plex
+    :type item_path: str
+    :param relative_path_base: Plex/NAS library root to strip from item paths
+    :type relative_path_base: str
+    :param provider_instance: Music Assistant filesystem provider instance id
+    :type provider_instance: str
+    :returns: Music Assistant track URI, or None if the item is outside the relative path base
+    :rtype: str|None
+    """
+
+    relative_item_path = export_path_to_m3u_path(item_path, relative_path_base)
+    if relative_item_path == item_path:
+        return None
+
+    return f"{provider_instance}://track/{relative_item_path}"
+
+
+def get_music_assistant_filesystem_provider(baseurl: str, token: str) -> str:
+    """
+    Function: get_music_assistant_filesystem_provider()
+
+    Returns a filesystem provider instance id from the Music Assistant library.
+
+    :param baseurl: Music Assistant server URL
+    :type baseurl: str
+    :param token: Music Assistant bearer token
+    :type token: str
+    :returns: Filesystem provider instance id
+    :rtype: str
+    """
+
+    tracks = music_assistant_request(
+        baseurl,
+        token,
+        "music/tracks/library_items",
+        {"limit": 50},
+    )
+    if not isinstance(tracks, list):
+        print("ERROR: Music Assistant returned an unexpected track list.")
+        sys.exit(1)
+
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        for mapping in track.get("provider_mappings") or []:
+            if not isinstance(mapping, dict):
+                continue
+            domain = mapping.get("provider_domain") or ""
+            instance = mapping.get("provider_instance") or ""
+            if domain.startswith("filesystem") and instance:
+                return instance
+
+    print("ERROR: Could not find a filesystem music provider in the Music Assistant library.")
+    sys.exit(1)
+
+
+def music_assistant_request(
+    baseurl: str,
+    token: str,
+    command: str,
+    args: dict | None = None,
+    fail_loud: bool = True,
+) -> any:
+    """
+    Function: music_assistant_request()
+
+    Sends a command to the Music Assistant HTTP API and returns the result.
+
+    :param baseurl: Music Assistant server URL
+    :type baseurl: str
+    :param token: Music Assistant bearer token
+    :type token: str
+    :param command: API command name
+    :type command: str
+    :param args: Command arguments
+    :type args: dict|None
+    :param fail_loud: Exit the script when the API call fails
+    :type fail_loud: bool
+    :returns: API result payload
+    :rtype: any
+    """
+
+    url = f"{baseurl.rstrip('/')}/api"
+    payload = {
+        "message_id": command,
+        "command": command,
+        "args": args or {},
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        if not fail_loud:
+            return None
+        print(f'ERROR: Music Assistant API returned HTTP {error.code} for command "{command}".')
+        print(error_body)
+        sys.exit(1)
+    except urllib.error.URLError as error:
+        if not fail_loud:
+            return None
+        print(f'ERROR: Could not connect to Music Assistant at "{url}".')
+        print(error)
+        sys.exit(1)
+    except json.JSONDecodeError as error:
+        if not fail_loud:
+            return None
+        print(f'ERROR: Music Assistant API returned invalid JSON for command "{command}".')
+        print(error)
+        sys.exit(1)
+
+    if isinstance(body, dict) and "message_id" in body:
+        if body.get("error"):
+            if not fail_loud:
+                return None
+            print(f'ERROR: Music Assistant command "{command}" failed.')
+            print(body["error"])
+            sys.exit(1)
+        return body.get("result")
+
+    # HTTP /api returns the command result directly, e.g. a list of playlists.
+    return body
+
+
+def music_assistant_library_uri(baseurl: str, token: str, uri: str) -> str | None:
+    """
+    Function: music_assistant_library_uri()
+
+    Resolves a Music Assistant URI to a library track URI.
+
+    :param baseurl: Music Assistant server URL
+    :type baseurl: str
+    :param token: Music Assistant bearer token
+    :type token: str
+    :param uri: Track URI to resolve
+    :type uri: str
+    :returns: Library URI, or None if the track is not in the library
+    :rtype: str|None
+    """
+
+    item = music_assistant_request(
+        baseurl,
+        token,
+        "music/item_by_uri",
+        {"uri": uri},
+        fail_loud=False,
+    )
+    if not isinstance(item, dict):
+        return None
+    return item.get("uri")
+
+
+def wait_for_music_assistant_playlist_tracks(
+    baseurl: str,
+    token: str,
+    playlist_id: str | int,
+    expected_count: int,
+    timeout_seconds: int = 300,
+) -> int:
+    """
+    Function: wait_for_music_assistant_playlist_tracks()
+
+    Waits until a Music Assistant playlist contains the expected number of tracks.
+
+    :param baseurl: Music Assistant server URL
+    :type baseurl: str
+    :param token: Music Assistant bearer token
+    :type token: str
+    :param playlist_id: Library playlist id
+    :type playlist_id: str|int
+    :param expected_count: Number of tracks that should be present
+    :type expected_count: int
+    :param timeout_seconds: Maximum time to wait
+    :type timeout_seconds: int
+    :returns: Number of tracks found
+    :rtype: int
+    """
+
+    deadline = time.time() + timeout_seconds
+    track_count = 0
+
+    while time.time() <= deadline:
+        tracks = music_assistant_request(
+            baseurl,
+            token,
+            "music/playlists/playlist_tracks",
+            {"item_id": str(playlist_id), "provider_instance_id_or_domain": "library"},
+        )
+        track_count = len(tracks) if isinstance(tracks, list) else 0
+        if track_count >= expected_count:
+            return track_count
+        time.sleep(1)
+
+    return track_count
 
 
 def object_to_string(item: any, attr: str) -> str:
@@ -1214,6 +1435,227 @@ def export_playlist_as_m3u(config: PlexConfig, playlist: Playlist) -> Path:
     return output_file_path
 
 
+def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -> str:
+    """
+    Function: export_playlist_to_music_assistant()
+
+    Exports a playlist to a Music Assistant library playlist.
+
+    :param config: PlexConfig object
+    :type config: PlexConfig
+    :param playlist: Playlist object
+    :type playlist: Playlist
+    :returns: Name of the Music Assistant playlist
+    :rtype: str
+    """
+
+    baseurl = (config.get("music_assistant.baseurl") or "").strip()
+    token = (config.get("music_assistant.token") or "").strip()
+    relative_path_base = (config.get("export.relative_path_base") or "").strip()
+
+    if not baseurl:
+        print("ERROR: music_assistant.baseurl must be set to export a playlist to Music Assistant.")
+        sys.exit(1)
+    if not token:
+        print("ERROR: music_assistant.token must be set to export a playlist to Music Assistant.")
+        sys.exit(1)
+    if not relative_path_base:
+        print("ERROR: export.relative_path_base must be set to export a playlist to Music Assistant.")
+        sys.exit(1)
+
+    clear()
+    print(
+        "Playlist export in progress. This may take a while depending on the size of your playlist. Please be patient.",
+    )
+    print(f'Using Music Assistant at "{baseurl.rstrip("/")}".')
+    filesystem_provider = get_music_assistant_filesystem_provider(baseurl, token)
+    print(
+        f'Mapping media paths relative to "{Path(relative_path_base).expanduser().resolve(strict=False)}" '
+        f'as "{filesystem_provider}" track URIs.',
+    )
+
+    items = list(playlist.items())
+    skipped_items = 0
+    unmatched_relative_base_paths = 0
+    unresolved_library_uris = 0
+    filesystem_uris = []
+
+    progress_started_at = datetime.datetime.now()
+    print_progress_bar(0, len(items), "Exporting playlist", progress_started_at)
+
+    for index, item in enumerate(items, start=1):
+        try:
+            item_paths = item_to_paths(item)
+            if not item_paths:
+                skipped_items += 1
+                continue
+
+            mapped_item_uris = []
+            for item_path in item_paths:
+                music_assistant_item_uri = export_path_to_music_assistant_uri(
+                    item_path,
+                    relative_path_base,
+                    filesystem_provider,
+                )
+                if music_assistant_item_uri is None:
+                    unmatched_relative_base_paths += 1
+                    continue
+                mapped_item_uris.append(music_assistant_item_uri)
+
+            if not mapped_item_uris:
+                continue
+
+            filesystem_uris.extend(mapped_item_uris)
+        finally:
+            print_progress_bar(index, len(items), "Exporting playlist", progress_started_at)
+
+    print()
+
+    if not filesystem_uris:
+        print(f'ERROR: Playlist "{playlist.title}" has no exportable local media files.')
+        if unmatched_relative_base_paths:
+            print(
+                f"{unmatched_relative_base_paths} media file paths are outside "
+                f'the configured relative path base "{Path(relative_path_base).expanduser().resolve(strict=False)}".',
+            )
+        sys.exit(1)
+
+    library_uris = []
+    progress_started_at = datetime.datetime.now()
+    print_progress_bar(0, len(filesystem_uris), "Resolving tracks", progress_started_at)
+    for index, filesystem_uri in enumerate(filesystem_uris, start=1):
+        try:
+            library_uri = music_assistant_library_uri(baseurl, token, filesystem_uri)
+            if library_uri:
+                library_uris.append(library_uri)
+            else:
+                unresolved_library_uris += 1
+        finally:
+            print_progress_bar(index, len(filesystem_uris), "Resolving tracks", progress_started_at)
+
+    print()
+
+    if not library_uris:
+        print(f'ERROR: None of the tracks in "{playlist.title}" were found in the Music Assistant library.')
+        sys.exit(1)
+
+    matching_playlists = []
+    library_playlists = music_assistant_request(
+        baseurl,
+        token,
+        "music/playlists/library_items",
+        {"search": playlist.title, "limit": 500},
+    )
+    if library_playlists is None:
+        library_playlists = []
+    if not isinstance(library_playlists, list):
+        print("ERROR: Music Assistant returned an unexpected playlist list.")
+        sys.exit(1)
+
+    playlist_title_key = playlist.title.casefold()
+    for library_playlist in library_playlists:
+        if not isinstance(library_playlist, dict):
+            print("ERROR: Music Assistant returned an unexpected playlist item.")
+            sys.exit(1)
+        if (library_playlist.get("name") or "").casefold() == playlist_title_key:
+            matching_playlists.append(library_playlist)
+
+    if len(matching_playlists) > 1:
+        matching_names = ", ".join(f'"{item.get("name")}"' for item in matching_playlists)
+        print(
+            f'ERROR: Music Assistant has {len(matching_playlists)} playlists named "{playlist.title}": '
+            f"{matching_names}.",
+        )
+        sys.exit(1)
+
+    music_assistant_playlist_name = playlist.title
+    existing_playlist = matching_playlists[0] if matching_playlists else None
+
+    if existing_playlist:
+        replace = confirm_question(
+            f'A playlist named "{playlist.title}" already exists in Music Assistant. '
+            "Do you want to replace it (the existing playlist will be deleted and recreated)?",
+            default=False,
+        )
+        if replace:
+            existing_playlist_id = existing_playlist.get("item_id")
+            if existing_playlist_id is None:
+                print(f'ERROR: Music Assistant playlist "{playlist.title}" has no item_id.')
+                sys.exit(1)
+            print(f'Deleting existing Music Assistant playlist "{playlist.title}"...')
+            music_assistant_request(
+                baseurl,
+                token,
+                "music/library/remove_item",
+                {"media_type": "playlist", "library_item_id": existing_playlist_id},
+            )
+        else:
+            music_assistant_playlist_name = f"{playlist.title} {datetime.datetime.now().strftime('%Y-%m-%d %H-%M')}"
+
+    print(f'Creating Music Assistant playlist "{music_assistant_playlist_name}"...')
+    created_playlist = music_assistant_request(
+        baseurl,
+        token,
+        "music/playlists/create_playlist",
+        {"name": music_assistant_playlist_name},
+    )
+    if not isinstance(created_playlist, dict) or created_playlist.get("item_id") is None:
+        print("ERROR: Music Assistant did not return a playlist id after create_playlist.")
+        sys.exit(1)
+
+    created_playlist_id = created_playlist["item_id"]
+    if created_playlist.get("name"):
+        music_assistant_playlist_name = created_playlist["name"]
+
+    print(f'Adding {len(library_uris)} tracks to "{music_assistant_playlist_name}"...')
+    add_task = music_assistant_request(
+        baseurl,
+        token,
+        "music/playlists/add_playlist_tracks",
+        {"db_playlist_id": created_playlist_id, "uris": library_uris},
+    )
+    if isinstance(add_task, dict) and add_task.get("last_error"):
+        print("ERROR: Music Assistant failed to add tracks to the playlist.")
+        print(add_task["last_error"])
+        sys.exit(1)
+
+    add_task_status = str((add_task or {}).get("status") if isinstance(add_task, dict) else "").lower()
+    wait_timeout = (
+        15
+        if isinstance(add_task, dict)
+        and (add_task.get("finished_at") or add_task_status in {"completed", "complete", "finished", "success", "done"})
+        else 300
+    )
+    added_track_count = wait_for_music_assistant_playlist_tracks(
+        baseurl,
+        token,
+        created_playlist_id,
+        len(library_uris),
+        timeout_seconds=wait_timeout,
+    )
+    if added_track_count < len(library_uris):
+        print(
+            f'ERROR: Music Assistant playlist "{music_assistant_playlist_name}" contains '
+            f"{added_track_count}/{len(library_uris)} tracks after export.",
+        )
+        sys.exit(1)
+
+    print(f'✅ Playlist "{playlist.title}" exported to Music Assistant as "{music_assistant_playlist_name}".')
+    if skipped_items:
+        print(f"⚠️ Skipped {skipped_items} items because no local media file path was available.")
+    if unmatched_relative_base_paths:
+        print(
+            f"⚠️ Skipped {unmatched_relative_base_paths} media file paths because they are outside "
+            f'the configured relative path base "{Path(relative_path_base).expanduser().resolve(strict=False)}".',
+        )
+    if unresolved_library_uris:
+        print(
+            f"⚠️ Skipped {unresolved_library_uris} tracks because they were not found in the Music Assistant library.",
+        )
+
+    return music_assistant_playlist_name
+
+
 if __name__ == "__main__":
     clear()
 
@@ -1232,6 +1674,7 @@ if __name__ == "__main__":
                 "Upgrade playlists (audio only)",
                 "Find all music albums with low bitrate (audio only)",
                 "Export playlist as M3U (audio & video)",
+                "Export playlist to Music Assistant (audio only)",
             ],
             automatic_single_coice_return=False,
         )
@@ -1393,6 +1836,21 @@ if __name__ == "__main__":
             )
 
             export_playlist_as_m3u(
+                config=config,
+                playlist=playlist,
+            )
+
+        # Export playlist to Music Assistant
+        elif action == "Export playlist to Music Assistant (audio only)":
+            playlists = get_playlists(server, ["audio"])
+            playlist = question(
+                message="Select a playlist to export",
+                items=playlists,
+                attr="title",
+                automatic_single_coice_return=False,
+            )
+
+            export_playlist_to_music_assistant(
                 config=config,
                 playlist=playlist,
             )
