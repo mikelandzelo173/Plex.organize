@@ -445,13 +445,107 @@ def music_assistant_library_uri(baseurl: str, token: str, uri: str) -> str | Non
     return item.get("uri")
 
 
+def music_assistant_track_uris(track: dict) -> set[str]:
+    """
+    Function: music_assistant_track_uris()
+
+    Collects identity URIs from a Music Assistant track payload.
+
+    :param track: Track object returned by the Music Assistant API
+    :type track: dict
+    :returns: URIs that can identify the track
+    :rtype: set[str]
+    """
+
+    uris = set()
+    if not isinstance(track, dict):
+        return uris
+
+    uri = track.get("uri")
+    if uri:
+        uris.add(uri)
+
+    item_id = track.get("item_id")
+    provider = track.get("provider")
+    if item_id and provider:
+        uris.add(f"{provider}://track/{item_id}")
+
+    for mapping in track.get("provider_mappings") or []:
+        if not isinstance(mapping, dict):
+            continue
+        mapping_uri = mapping.get("uri")
+        if mapping_uri:
+            uris.add(mapping_uri)
+        mapping_instance = mapping.get("provider_instance")
+        mapping_item_id = mapping.get("item_id")
+        if mapping_instance and mapping_item_id:
+            uris.add(f"{mapping_instance}://track/{mapping_item_id}")
+
+    return uris
+
+
+def music_assistant_duplicate_library_uri_groups(resolved_tracks: list[dict]) -> list[list[dict]]:
+    """
+    Function: music_assistant_duplicate_library_uri_groups()
+
+    Groups resolved export records that share the same Music Assistant library URI.
+
+    :param resolved_tracks: Export records with a library_uri
+    :type resolved_tracks: list[dict]
+    :returns: Groups that contain more than one record
+    :rtype: list[list[dict]]
+    """
+
+    groups = {}
+    for track in resolved_tracks:
+        library_uri = track["library_uri"]
+        groups.setdefault(library_uri, []).append(track)
+
+    return [group for group in groups.values() if len(group) > 1]
+
+
+def unmatched_music_assistant_export_tracks(resolved_tracks: list[dict], playlist_tracks: list) -> list[dict]:
+    """
+    Function: unmatched_music_assistant_export_tracks()
+
+    Returns export records that have no remaining match in a Music Assistant playlist.
+
+    :param resolved_tracks: Export records that were sent to Music Assistant
+    :type resolved_tracks: list[dict]
+    :param playlist_tracks: Tracks currently in the Music Assistant playlist
+    :type playlist_tracks: list
+    :returns: Export records that are missing from the playlist
+    :rtype: list[dict]
+    """
+
+    remaining = []
+    for track in playlist_tracks or []:
+        if isinstance(track, dict):
+            remaining.append(music_assistant_track_uris(track))
+
+    unmatched = []
+    for record in resolved_tracks:
+        match_index = None
+        candidates = {record["library_uri"], record["filesystem_uri"]}
+        for index, uris in enumerate(remaining):
+            if candidates & uris:
+                match_index = index
+                break
+        if match_index is None:
+            unmatched.append(record)
+        else:
+            remaining.pop(match_index)
+
+    return unmatched
+
+
 def wait_for_music_assistant_playlist_tracks(
     baseurl: str,
     token: str,
     playlist_id: str | int,
     expected_count: int,
     timeout_seconds: int = 300,
-) -> int:
+) -> tuple[int, list]:
     """
     Function: wait_for_music_assistant_playlist_tracks()
 
@@ -467,26 +561,28 @@ def wait_for_music_assistant_playlist_tracks(
     :type expected_count: int
     :param timeout_seconds: Maximum time to wait
     :type timeout_seconds: int
-    :returns: Number of tracks found
-    :rtype: int
+    :returns: Number of tracks found and the last fetched track list
+    :rtype: tuple[int, list]
     """
 
     deadline = time.time() + timeout_seconds
+    tracks = []
     track_count = 0
 
     while time.time() <= deadline:
-        tracks = music_assistant_request(
+        playlist_tracks = music_assistant_request(
             baseurl,
             token,
             "music/playlists/playlist_tracks",
             {"item_id": str(playlist_id), "provider_instance_id_or_domain": "library"},
         )
-        track_count = len(tracks) if isinstance(tracks, list) else 0
+        tracks = playlist_tracks if isinstance(playlist_tracks, list) else []
+        track_count = len(tracks)
         if track_count >= expected_count:
-            return track_count
+            return track_count, tracks
         time.sleep(1)
 
-    return track_count
+    return track_count, tracks
 
 
 def object_to_string(item: any, attr: str) -> str:
@@ -1478,7 +1574,7 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
     skipped_items = 0
     unmatched_relative_base_paths = 0
     unresolved_library_uris = 0
-    filesystem_uris = []
+    mapped_tracks = []
 
     progress_started_at = datetime.datetime.now()
     print_progress_bar(0, len(items), "Exporting playlist", progress_started_at)
@@ -1490,6 +1586,7 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
                 skipped_items += 1
                 continue
 
+            label = audio_to_str(item) if isinstance(item, Audio) else item.title
             mapped_item_uris = []
             for item_path in item_paths:
                 music_assistant_item_uri = export_path_to_music_assistant_uri(
@@ -1505,13 +1602,14 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
             if not mapped_item_uris:
                 continue
 
-            filesystem_uris.extend(mapped_item_uris)
+            for filesystem_uri in mapped_item_uris:
+                mapped_tracks.append({"label": label, "filesystem_uri": filesystem_uri})
         finally:
             print_progress_bar(index, len(items), "Exporting playlist", progress_started_at)
 
     print()
 
-    if not filesystem_uris:
+    if not mapped_tracks:
         print(f'ERROR: Playlist "{playlist.title}" has no exportable local media files.')
         if unmatched_relative_base_paths:
             print(
@@ -1520,24 +1618,32 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
             )
         sys.exit(1)
 
-    library_uris = []
+    resolved_tracks = []
     progress_started_at = datetime.datetime.now()
-    print_progress_bar(0, len(filesystem_uris), "Resolving tracks", progress_started_at)
-    for index, filesystem_uri in enumerate(filesystem_uris, start=1):
+    print_progress_bar(0, len(mapped_tracks), "Resolving tracks", progress_started_at)
+    for index, mapped_track in enumerate(mapped_tracks, start=1):
         try:
-            library_uri = music_assistant_library_uri(baseurl, token, filesystem_uri)
+            library_uri = music_assistant_library_uri(baseurl, token, mapped_track["filesystem_uri"])
             if library_uri:
-                library_uris.append(library_uri)
+                resolved_tracks.append(
+                    {
+                        "label": mapped_track["label"],
+                        "filesystem_uri": mapped_track["filesystem_uri"],
+                        "library_uri": library_uri,
+                    },
+                )
             else:
                 unresolved_library_uris += 1
         finally:
-            print_progress_bar(index, len(filesystem_uris), "Resolving tracks", progress_started_at)
+            print_progress_bar(index, len(mapped_tracks), "Resolving tracks", progress_started_at)
 
     print()
 
-    if not library_uris:
+    if not resolved_tracks:
         print(f'ERROR: None of the tracks in "{playlist.title}" were found in the Music Assistant library.')
         sys.exit(1)
+
+    library_uris = [track["library_uri"] for track in resolved_tracks]
 
     matching_playlists = []
     library_playlists = music_assistant_request(
@@ -1626,7 +1732,7 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
         and (add_task.get("finished_at") or add_task_status in {"completed", "complete", "finished", "success", "done"})
         else 300
     )
-    added_track_count = wait_for_music_assistant_playlist_tracks(
+    added_track_count, added_tracks = wait_for_music_assistant_playlist_tracks(
         baseurl,
         token,
         created_playlist_id,
@@ -1638,6 +1744,26 @@ def export_playlist_to_music_assistant(config: PlexConfig, playlist: Playlist) -
             f'ERROR: Music Assistant playlist "{music_assistant_playlist_name}" contains '
             f"{added_track_count}/{len(library_uris)} tracks after export.",
         )
+        unmatched_tracks = unmatched_music_assistant_export_tracks(resolved_tracks, added_tracks)
+        if unmatched_tracks:
+            print("Music Assistant did not keep these tracks:")
+            for record in unmatched_tracks:
+                print(f"  - {record['label']}")
+                print(f"    {record['filesystem_uri']}")
+        else:
+            print("Could not identify which sent tracks are missing from the playlist response.")
+
+        duplicate_groups = music_assistant_duplicate_library_uri_groups(resolved_tracks)
+        if duplicate_groups:
+            print("These Plex tracks resolved to the same Music Assistant library item:")
+            for group in duplicate_groups:
+                print(f"  {group[0]['library_uri']}")
+                for record in group:
+                    print(f"    - {record['label']}")
+                    print(f"      {record['filesystem_uri']}")
+            duplicate_extras = sum(len(group) - 1 for group in duplicate_groups)
+            if len(unmatched_tracks) == duplicate_extras:
+                print("Music Assistant skipped the duplicate library item(s).")
         sys.exit(1)
 
     print(f'✅ Playlist "{playlist.title}" exported to Music Assistant as "{music_assistant_playlist_name}".')
